@@ -7,15 +7,103 @@ import {
   AlertTriangle,
   Flame,
   CheckCircle,
-  HelpCircle
+  HelpCircle,
+  MessageSquare
 } from "lucide-react";
 import DropZone from "./components/DropZone";
 import AnalysisDashboard from "./components/AnalysisDashboard";
 import ChatSection from "./components/ChatSection";
 import DocumentPreview from "./components/DocumentPreview";
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 // Retrieve Gemini API Key from environment variables securely
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
+
+// Client-side PDF text and heading extractor
+const extractPdfTitleAndText = async (fileUrl) => {
+  try {
+    const loadingTask = pdfjsLib.getDocument(fileUrl);
+    const pdf = await loadingTask.promise;
+    const page = await pdf.getPage(1);
+    const textContent = await page.getTextContent();
+    const items = textContent.items;
+    
+    const textLines = [];
+    let currentLine = '';
+    let lastY = -1;
+    
+    for (const item of items) {
+      if (!item.str.trim()) continue;
+      
+      const y = item.transform[5];
+      const fontSize = item.transform[0];
+      
+      if (lastY === -1 || Math.abs(y - lastY) < 5) {
+        currentLine += (currentLine ? ' ' : '') + item.str;
+      } else {
+        if (currentLine.trim()) {
+          textLines.push({ text: currentLine.trim(), y: lastY, fontSize });
+        }
+        currentLine = item.str;
+      }
+      lastY = y;
+    }
+    if (currentLine.trim()) {
+      textLines.push({ text: currentLine.trim(), y: lastY, fontSize: items[items.length - 1]?.transform[0] || 10 });
+    }
+    
+    textLines.sort((a, b) => b.y - a.y);
+    
+    let headingTitle = '';
+    let authorNames = [];
+    
+    if (textLines.length > 0) {
+      let maxFontSize = 0;
+      let titleIndex = 0;
+      
+      const scanLimit = Math.min(10, textLines.length);
+      for (let i = 0; i < scanLimit; i++) {
+        if (textLines[i].fontSize > maxFontSize) {
+          maxFontSize = textLines[i].fontSize;
+          titleIndex = i;
+        }
+      }
+      
+      headingTitle = textLines[titleIndex]?.text || '';
+      
+      if (titleIndex + 1 < textLines.length && Math.abs(textLines[titleIndex].fontSize - textLines[titleIndex + 1].fontSize) < 3) {
+        headingTitle += ' ' + textLines[titleIndex + 1].text;
+      }
+      
+      for (let i = titleIndex + 1; i < Math.min(titleIndex + 5, textLines.length); i++) {
+        const lineText = textLines[i].text;
+        if (
+          lineText.toLowerCase().includes("abstract") || 
+          lineText.toLowerCase().includes("introduction") ||
+          lineText.toLowerCase().includes("email") ||
+          lineText.length > 100
+        ) {
+          break;
+        }
+        const names = lineText.split(/[,;\t]/).map(n => n.replace(/[*†1-9]/g, "").trim()).filter(n => n.length > 3 && n.length < 30);
+        if (names.length > 0) {
+          authorNames.push(...names);
+        }
+      }
+    }
+    
+    return {
+      extractedTitle: headingTitle.trim(),
+      extractedAuthors: authorNames.slice(0, 3)
+    };
+  } catch (err) {
+    console.error("PDF.js parsing failed:", err);
+    return { extractedTitle: "", extractedAuthors: [] };
+  }
+};
 
 export default function App() {
   const [file, setFile] = useState(null);
@@ -24,9 +112,10 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
   const [systemAlert, setSystemAlert] = useState(null);
+  const [activeTab, setActiveTab] = useState("analysis");
 
   // Helper: Generates realistic mock analysis when API key is missing or calls fail
-  const generateMockAnalysis = (fileName, base64) => {
+  const generateMockAnalysis = (fileName, base64, extractedTitle, extractedAuthors) => {
     let pdfMeta = { title: "", author: "" };
     
     // Scan PDF binary metadata for real /Title and /Author properties
@@ -55,7 +144,7 @@ export default function App() {
     }
 
     const cleanName = fileName.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
-    let title = pdfMeta.title;
+    let title = extractedTitle || pdfMeta.title;
     
     if (!title) {
       const lowerFile = fileName.toLowerCase();
@@ -85,7 +174,9 @@ export default function App() {
 
     // Assign realistic authors or mark empty if file looks like a clean document
     let authors = [];
-    if (pdfMeta.author) {
+    if (extractedAuthors && extractedAuthors.length > 0) {
+      authors = extractedAuthors;
+    } else if (pdfMeta.author) {
       authors = [pdfMeta.author];
     } else {
       const lowerFile = fileName.toLowerCase();
@@ -122,12 +213,27 @@ export default function App() {
     };
   };
 
-  const handleFileLoaded = (loadedFile) => {
+  const handleFileLoaded = async (loadedFile) => {
     setFile(loadedFile);
     // Reset previous states
     setAnalysisResult(null);
     setChatHistory([]);
     setSystemAlert(null);
+
+    // Extract visual heading title and authors from PDF client-side!
+    try {
+      const { extractedTitle, extractedAuthors } = await extractPdfTitleAndText(loadedFile.url);
+      setFile(prev => {
+        if (!prev || prev.url !== loadedFile.url) return prev;
+        return {
+          ...prev,
+          extractedTitle: extractedTitle || "",
+          extractedAuthors: extractedAuthors || []
+        };
+      });
+    } catch (e) {
+      console.error("Local heading parsing failed:", e);
+    }
   };
 
   const handleReset = () => {
@@ -145,7 +251,7 @@ export default function App() {
     // If API Key is missing, trigger simulated mode
     if (!GEMINI_API_KEY) {
       setTimeout(() => {
-        const mockData = generateMockAnalysis(file.name, file.base64);
+        const mockData = generateMockAnalysis(file.name, file.base64, file.extractedTitle, file.extractedAuthors);
         setAnalysisResult(mockData);
         setIsAnalyzing(false);
         setSystemAlert({
@@ -217,7 +323,7 @@ export default function App() {
     } catch (err) {
       console.error("API Call Error, falling back to mock:", err);
       // Fail gracefully: show warning and launch mockup
-      const mockData = generateMockAnalysis(file.name, file.base64);
+      const mockData = generateMockAnalysis(file.name, file.base64, file.extractedTitle, file.extractedAuthors);
       setAnalysisResult(mockData);
       setSystemAlert({
         type: "warning",
@@ -433,15 +539,49 @@ Based on the parsed paper metrics for "${analysisResult?.title || "this document
           )}
 
           {analysisResult ? (
-            <>
-              <AnalysisDashboard data={analysisResult} />
-              <ChatSection
-                chatHistory={chatHistory}
-                onSendMessage={handleSendMessage}
-                isLoading={chatLoading}
-                onClearHistory={() => setChatHistory([])}
-              />
-            </>
+            <div style={styles.workspaceTabsContainer}>
+              {/* Tab Headers */}
+              <div style={styles.tabHeaders}>
+                <button
+                  onClick={() => setActiveTab("analysis")}
+                  style={{
+                    ...styles.tabBtn,
+                    borderBottomColor: activeTab === "analysis" ? "var(--accent-primary)" : "transparent",
+                    color: activeTab === "analysis" ? "#fff" : "var(--text-secondary)",
+                    background: activeTab === "analysis" ? "rgba(99, 102, 241, 0.08)" : "transparent",
+                  }}
+                >
+                  <Database size={16} />
+                  <span>AI Summary Cards</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab("chat")}
+                  style={{
+                    ...styles.tabBtn,
+                    borderBottomColor: activeTab === "chat" ? "var(--accent-secondary)" : "transparent",
+                    color: activeTab === "chat" ? "#fff" : "var(--text-secondary)",
+                    background: activeTab === "chat" ? "rgba(168, 85, 247, 0.08)" : "transparent",
+                  }}
+                >
+                  <MessageSquare size={16} />
+                  <span>Interactive Chat Q&A</span>
+                </button>
+              </div>
+
+              {/* Tab Contents */}
+              <div style={styles.tabContentWrapper}>
+                {activeTab === "analysis" ? (
+                  <AnalysisDashboard data={analysisResult} />
+                ) : (
+                  <ChatSection
+                    chatHistory={chatHistory}
+                    onSendMessage={handleSendMessage}
+                    isLoading={chatLoading}
+                    onClearHistory={() => setChatHistory([])}
+                  />
+                )}
+              </div>
+            </div>
           ) : (
             !isAnalyzing && (
               <div className="glass-card" style={styles.emptyOutputCard}>
@@ -542,6 +682,38 @@ const styles = {
     gap: "24px",
     width: "100%",
     height: "100%",
+  },
+  workspaceTabsContainer: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "16px",
+    height: "100%",
+  },
+  tabHeaders: {
+    display: "flex",
+    borderBottom: "1px solid var(--glass-border)",
+    background: "rgba(10, 15, 30, 0.4)",
+    borderRadius: "12px 12px 0 0",
+    padding: "4px 8px 0 8px",
+    gap: "8px",
+  },
+  tabBtn: {
+    padding: "12px 20px",
+    fontSize: "0.88rem",
+    fontWeight: "600",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    borderBottom: "2px solid transparent",
+    borderRadius: "8px 8px 0 0",
+    transition: "all 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
+    cursor: "pointer",
+  },
+  tabContentWrapper: {
+    flexGrow: 1,
+    height: "calc(100% - 60px)",
+    overflowY: "auto",
+    paddingRight: "4px",
   },
   startAnalysisCard: {
     display: "flex",
