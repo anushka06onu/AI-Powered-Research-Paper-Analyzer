@@ -1,0 +1,520 @@
+import React, { useState } from "react";
+import {
+  FileText,
+  Database,
+  Cpu,
+  Brain,
+  AlertTriangle,
+  Flame,
+  CheckCircle,
+  HelpCircle
+} from "lucide-react";
+import DropZone from "./components/DropZone";
+import AnalysisDashboard from "./components/AnalysisDashboard";
+import ChatSection from "./components/ChatSection";
+import DocumentPreview from "./components/DocumentPreview";
+
+// Retrieve Gemini API Key from environment variables securely
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
+
+export default function App() {
+  const [file, setFile] = useState(null);
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [chatHistory, setChatHistory] = useState([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [systemAlert, setSystemAlert] = useState(null);
+
+  // Helper: Generates realistic mock analysis when API key is missing or calls fail
+  const generateMockAnalysis = (fileName) => {
+    const cleanName = fileName.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
+    const title = cleanName
+      .split(" ")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+
+    return {
+      title: title,
+      authors: ["Dr. Evelyn Vance", "Prof. Marcus Thorne", "Sarah Jenkins"],
+      abstract_summary: `This paper introduces a state-of-the-art methodology based on "${title}". The research addresses critical latency and bandwidth bottlenecks in current systems by constructing an optimized parallel processing architecture, demonstrating significant empirical gains.`,
+      key_contributions: [
+        `Design of an adaptive feedback control loop optimized specifically for ${title}`,
+        "Observed reduction of computational overhead by 37.4% under high stress tests",
+        "Introduction of an open-access evaluation suite for hardware benchmarks",
+        "Successful integration testing across heterogeneous cloud infrastructures"
+      ],
+      methodology: `The research framework employs a three-tier processing model. First, raw streaming telemetry is ingested and filtered. Second, an intelligent scheduling broker distributes parallel loads. Finally, a loss-minimization layer aggregates outputs, stabilizing feedback control loops in real-time.`,
+      keywords: [
+        cleanName.split(" ")[0] || "Analysis",
+        "Parallel Computing",
+        "Performance Optimization",
+        "Benchmarking",
+        "System Architecture"
+      ],
+      future_work: [
+        "Porting the operational compiler to edge IoT sensor platforms",
+        "Implementing native support for zero-shot dynamic load resizing",
+        "Integrating deep reinforcement learning models for cognitive routing"
+      ]
+    };
+  };
+
+  const handleFileLoaded = (loadedFile) => {
+    setFile(loadedFile);
+    // Reset previous states
+    setAnalysisResult(null);
+    setChatHistory([]);
+    setSystemAlert(null);
+  };
+
+  const handleReset = () => {
+    setFile(null);
+    setAnalysisResult(null);
+    setChatHistory([]);
+    setSystemAlert(null);
+  };
+
+  const triggerAnalysis = async () => {
+    if (!file) return;
+    setIsAnalyzing(true);
+    setSystemAlert(null);
+
+    // If API Key is missing, trigger simulated mode
+    if (!GEMINI_API_KEY) {
+      setTimeout(() => {
+        const mockData = generateMockAnalysis(file.name);
+        setAnalysisResult(mockData);
+        setIsAnalyzing(false);
+        setSystemAlert({
+          type: "simulated",
+          message: "No Gemini API Key configured in your .env file. Running in High-Fidelity Simulated Mode."
+        });
+      }, 2500);
+      return;
+    }
+
+    // Direct Gemini-2.0-Flash API Call
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: "application/pdf",
+                    data: file.base64
+                  }
+                },
+                {
+                  text: `You are a professional research paper analyst. Analyze this research paper and extract structural details into the requested JSON schema. You MUST return ONLY valid, raw JSON without backticks, markdown formatting, or conversational text. Use this exact JSON structure:
+{
+  "title": "Full official paper title",
+  "authors": ["Author name 1", "Author name 2"],
+  "abstract_summary": "2-3 sentence plain-English summary",
+  "key_contributions": ["contribution 1", "contribution 2"],
+  "methodology": "Simple explanation of the research process in 3-5 sentences a high school student could understand",
+  "keywords": ["keyword1", "keyword2"],
+  "future_work": ["suggestion 1", "suggestion 2"]
+}`
+                }
+              ]
+            }
+          ],
+          generationConfig: {
+            responseMimeType: "application/json"
+          }
+        })
+      });
+
+      if (!response.ok) {
+        let errorMsg = `Status ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData.error && errData.error.message) {
+            errorMsg = errData.error.message;
+          }
+        } catch (_) {}
+        throw new Error(errorMsg);
+      }
+
+      const data = await response.json();
+      const rawText = data.candidates[0].content.parts[0].text;
+      const parsed = JSON.parse(rawText.trim());
+      
+      setAnalysisResult(parsed);
+      setSystemAlert({
+        type: "success",
+        message: "Successfully analyzed research paper using Gemini-2.0-Flash."
+      });
+    } catch (err) {
+      console.error("API Call Error, falling back to mock:", err);
+      // Fail gracefully: show warning and launch mockup
+      const mockData = generateMockAnalysis(file.name);
+      setAnalysisResult(mockData);
+      setSystemAlert({
+        type: "warning",
+        message: `Gemini API connection failed (${err.message}). Loaded high-fidelity mock report to preserve workflow.`
+      });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleSendMessage = async (text) => {
+    if (!text.trim() || chatLoading) return;
+
+    const newChatHistory = [...chatHistory, { role: "user", content: text }];
+    setChatHistory(newChatHistory);
+    setChatLoading(true);
+
+    // If API Key is missing, trigger simulated replies
+    if (!GEMINI_API_KEY) {
+      setTimeout(() => {
+        let reply = "";
+        const lowerText = text.toLowerCase();
+        
+        if (lowerText.includes("limitation") || lowerText.includes("weakness")) {
+          reply = `In this research on "${analysisResult?.title || "the uploaded paper"}", key limitations center on:
+1. **Sample Generalizability**: Tests were performed on a restricted set of hardware configurations, which may not capture performance scaling issues in production environments.
+2. **Computational Footprint**: The high density of operations still demands substantial initial compute resource buffers during startup.
+3. **Data Dependency**: The architecture is highly dependent on high-fidelity telemetry feeds; missing or corrupt inputs could degrade aggregation precision.`;
+        } else if (lowerText.includes("methodology") || lowerText.includes("how did they")) {
+          reply = `The core methodology involves a three-phase scientific workflow:
+1. **Telemetry Capture**: Custom hooks ingest raw system indicators with sub-millisecond latency.
+2. **Dynamic Scheduling**: An intelligent middleware layer partitions pipeline threads based on actual processor weights.
+3. **Aggregating Feedback**: Output datasets are normalized, feeding a convergence loop that mitigates error rates.`;
+        } else if (lowerText.includes("application") || lowerText.includes("practical")) {
+          reply = `Practical applications of "${analysisResult?.title || "this research"}" include:
+- **Cloud Datacenter Management**: Automating node allocations in large-scale server matrices.
+- **Embedded Computing**: Reducing CPU overhead in smart industrial IoT gateway systems.
+- **Aesthetic UI Architectures**: Constructing highly-responsive, micro-controlled user dashboards.`;
+        } else {
+          reply = `Regarding your question about "${text}":
+
+Based on the parsed paper metrics for "${analysisResult?.title || "this document"}", the authors emphasize that their design successfully isolates and resolves this specific problem domain. The experimental sections document a 25%+ improvement in performance metrics when running within normal parameter ranges. Future validation steps will expand directly on this aspect.`;
+        }
+
+        setChatHistory([...newChatHistory, { role: "assistant", content: reply }]);
+        setChatLoading(false);
+      }, 1500);
+      return;
+    }
+
+    // Direct Gemini-2.0-Flash Chat API Call
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: "application/pdf",
+                    data: file.base64
+                  }
+                },
+                {
+                  text: "Please analyze the attached paper. I will ask you follow-up questions about it."
+                }
+              ]
+            },
+            ...newChatHistory.map(msg => ({
+              role: msg.role === "user" ? "user" : "model",
+              parts: [
+                {
+                  text: msg.content
+                }
+              ]
+            }))
+          ],
+          systemInstruction: {
+            parts: [
+              {
+                text: "You are a professional research paper Q&A assistant. Answer user questions directly based on the uploaded research paper. Keep answers structured, technical, and objective."
+              }
+            ]
+          }
+        })
+      });
+
+      if (!response.ok) {
+        let errorMsg = `Status ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData.error && errData.error.message) {
+            errorMsg = errData.error.message;
+          }
+        } catch (_) {}
+        throw new Error(errorMsg);
+      }
+
+      const data = await response.json();
+      const rawText = data.candidates[0].content.parts[0].text;
+
+      setChatHistory([...newChatHistory, { role: "assistant", content: rawText }]);
+    } catch (err) {
+      console.error("Chat API error, falling back to mock reply:", err);
+      setChatHistory([
+        ...newChatHistory,
+        {
+          role: "assistant",
+          content: `[Network Fallback] I received your question: "${text}". Unfortunately, the Gemini API channel is experiencing blockages (${err.message}). Under standard operations, this question triggers a full textual lookup on the attached PDF base64 payload to fetch context-specific proofs.`
+        }
+      ]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  return (
+    <div className="app-container">
+      {/* Dynamic Glowing background particles */}
+      <div className="glow-spot glow-purple" />
+      <div className="glow-spot glow-indigo" />
+
+      {/* Header bar */}
+      <header className="glass-card" style={styles.header}>
+        <div style={styles.logoWrapper}>
+          <div style={styles.logoIcon}>
+            <Brain size={24} style={{ color: "var(--accent-primary)" }} />
+          </div>
+          <div>
+            <h1 style={styles.logoText}>
+              AURA <span style={styles.subLogoText}>Research Workspace</span>
+            </h1>
+            <p style={styles.logoSub}>AI-Powered Academic Intelligence & Q&A Workspace</p>
+          </div>
+        </div>
+
+      </header>
+
+      {/* Main Workspace Body */}
+      <main className="main-grid">
+        
+        {/* Upload Zone & PDF View Column */}
+        <section style={styles.workspaceColumn}>
+          <DropZone onFileLoaded={handleFileLoaded} file={file} onReset={handleReset} />
+          
+          {file && !analysisResult && !isAnalyzing && (
+            <div className="glass-card animate-fade-in" style={styles.startAnalysisCard}>
+              <Cpu size={24} style={{ color: "var(--accent-primary)", marginBottom: "8px" }} />
+              <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1.1rem", marginBottom: "4px" }}>
+                Ready for Deep Extraction
+              </h3>
+              <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "16px", lineHeight: "1.4" }}>
+                AURA will convert the document to deep text representation and extract structured components.
+              </p>
+              <button onClick={triggerAnalysis} className="btn-primary" style={{ width: "100%", justifyContent: "center" }}>
+                Analyze Research Paper
+              </button>
+            </div>
+          )}
+
+          {isAnalyzing && (
+            <div className="glass-card" style={styles.analyzingCard}>
+              <div className="scanner-overlay" />
+              <div className="scanner-line" />
+              <RefreshCw className="spinner" size={32} style={{ color: "var(--accent-primary)", marginBottom: "16px" }} />
+              <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1.15rem", marginBottom: "4px" }}>
+                Analyzing Academic Blueprint...
+              </h3>
+              <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+                Parsing PDF structures, mapping equations, and synthesizing plain-English cards.
+              </p>
+            </div>
+          )}
+
+          {file && <DocumentPreview file={file} />}
+        </section>
+
+        {/* AI Analysis Output & Chat Column */}
+        <section style={styles.workspaceColumn}>
+          {systemAlert && (
+            <div
+              className="animate-fade-in"
+              style={{
+                ...styles.alertBanner,
+                background:
+                  systemAlert.type === "simulated"
+                    ? "rgba(168, 85, 247, 0.08)"
+                    : systemAlert.type === "warning"
+                    ? "rgba(234, 179, 8, 0.08)"
+                    : "rgba(20, 184, 166, 0.08)",
+                borderColor:
+                  systemAlert.type === "simulated"
+                    ? "rgba(168, 85, 247, 0.25)"
+                    : systemAlert.type === "warning"
+                    ? "rgba(234, 179, 8, 0.25)"
+                    : "rgba(20, 184, 166, 0.25)"
+              }}
+            >
+              {systemAlert.type === "warning" ? (
+                <AlertTriangle size={16} style={{ color: "#eab308", flexShrink: 0 }} />
+              ) : (
+                <CheckCircle size={16} style={{ color: "var(--accent-teal)", flexShrink: 0 }} />
+              )}
+              <span style={{ fontSize: "0.82rem", color: "var(--text-primary)" }}>
+                {systemAlert.message}
+              </span>
+            </div>
+          )}
+
+          {analysisResult ? (
+            <>
+              <AnalysisDashboard data={analysisResult} />
+              <ChatSection
+                chatHistory={chatHistory}
+                onSendMessage={handleSendMessage}
+                isLoading={chatLoading}
+                onClearHistory={() => setChatHistory([])}
+              />
+            </>
+          ) : (
+            !isAnalyzing && (
+              <div className="glass-card" style={styles.emptyOutputCard}>
+                <Database size={44} style={{ color: "var(--text-muted)", marginBottom: "16px" }} />
+                <h3 style={{ fontFamily: "var(--font-heading)", fontSize: "1.2rem", color: "#fff", marginBottom: "8px" }}>
+                  Awaiting PDF Upload
+                </h3>
+                <p style={{ fontSize: "0.86rem", color: "var(--text-secondary)", maxWidth: "300px", lineHeight: "1.5" }}>
+                  Upload a research paper in the left pane to unlock full card visualization and interactive chat Q&A.
+                </p>
+              </div>
+            )
+          )}
+        </section>
+
+      </main>
+    </div>
+  );
+}
+
+// Inline custom spins for React
+const RefreshCw = ({ className, ...props }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    {...props}
+  >
+    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+    <path d="M3 3v5h5" />
+    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+    <path d="M16 16h5v5" />
+  </svg>
+);
+
+const styles = {
+  header: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "16px 28px",
+    border: "1px solid var(--glass-border)",
+    background: "rgba(10, 15, 30, 0.55)",
+    boxShadow: "0 8px 32px 0 rgba(0,0,0,0.2)",
+  },
+  logoWrapper: {
+    display: "flex",
+    alignItems: "center",
+    gap: "16px",
+    textAlign: "left",
+  },
+  logoIcon: {
+    width: "48px",
+    height: "48px",
+    borderRadius: "12px",
+    background: "rgba(99, 102, 241, 0.1)",
+    border: "1px solid rgba(99, 102, 241, 0.25)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "0 0 15px rgba(99, 102, 241, 0.15)",
+  },
+  logoText: {
+    fontFamily: "var(--font-heading)",
+    fontSize: "1.45rem",
+    fontWeight: "800",
+    color: "#fff",
+    lineHeight: "1.15",
+    letterSpacing: "0.05em",
+  },
+  subLogoText: {
+    color: "var(--accent-primary)",
+    fontWeight: "400",
+  },
+  logoSub: {
+    fontSize: "0.78rem",
+    color: "var(--text-secondary)",
+  },
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+  },
+  apiBtn: {
+    padding: "10px 18px",
+    fontSize: "0.85rem",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
+  workspaceColumn: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "24px",
+    width: "100%",
+  },
+  startAnalysisCard: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    textAlign: "center",
+    border: "1px solid var(--glass-border)",
+    background: "rgba(15, 23, 42, 0.4)",
+  },
+  analyzingCard: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    textAlign: "center",
+    padding: "48px 24px",
+    border: "1px solid rgba(99, 102, 241, 0.25)",
+    background: "rgba(10, 12, 30, 0.6)",
+  },
+  emptyOutputCard: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    textAlign: "center",
+    padding: "120px 40px",
+    border: "1px dashed var(--glass-border)",
+    background: "rgba(15, 23, 42, 0.2)",
+    height: "100%",
+    minHeight: "450px",
+  },
+  alertBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "12px 18px",
+    borderRadius: "12px",
+    border: "1px solid",
+    textAlign: "left",
+  },
+};
