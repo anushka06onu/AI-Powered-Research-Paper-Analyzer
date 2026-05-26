@@ -442,7 +442,9 @@ button {
   grid-template-columns: 1fr 1fr;
   gap: 28px;
   width: 100%;
-  align-items: start;
+  align-items: stretch;
+  height: calc(100vh - 140px);
+  min-height: 650px;
 }
 
 .uploaded-file-name {
@@ -462,6 +464,8 @@ button {
   }
   .main-grid {
     grid-template-columns: 1fr;
+    height: auto;
+    min-height: auto;
   }
 }
 

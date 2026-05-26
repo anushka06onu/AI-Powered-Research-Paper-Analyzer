@@ -26,16 +26,79 @@ export default function App() {
   const [systemAlert, setSystemAlert] = useState(null);
 
   // Helper: Generates realistic mock analysis when API key is missing or calls fail
-  const generateMockAnalysis = (fileName) => {
+  const generateMockAnalysis = (fileName, base64) => {
+    let pdfMeta = { title: "", author: "" };
+    
+    // Scan PDF binary metadata for real /Title and /Author properties
+    if (base64) {
+      try {
+        const binary = atob(base64.slice(0, 150000)); // scan first 150KB
+        
+        const titleMatch = binary.match(/\/Title\s*\(([^)]+)\)/);
+        if (titleMatch && titleMatch[1]) {
+          const rawTitle = titleMatch[1].replace(/\\([()])/g, "$1").trim();
+          if (rawTitle && !rawTitle.includes("\u00fe") && !rawTitle.startsWith("\xfe")) {
+            pdfMeta.title = rawTitle;
+          }
+        }
+        
+        const authorMatch = binary.match(/\/Author\s*\(([^)]+)\)/);
+        if (authorMatch && authorMatch[1]) {
+          const rawAuthor = authorMatch[1].replace(/\\([()])/g, "$1").trim();
+          if (rawAuthor && !rawAuthor.includes("\u00fe") && !rawAuthor.startsWith("\xfe")) {
+            pdfMeta.author = rawAuthor;
+          }
+        }
+      } catch (e) {
+        console.error("Error extracting local PDF metadata:", e);
+      }
+    }
+
     const cleanName = fileName.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
-    const title = cleanName
-      .split(" ")
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(" ");
+    let title = pdfMeta.title;
+    
+    if (!title) {
+      const lowerFile = fileName.toLowerCase();
+      if (lowerFile.includes("attention") || lowerFile.includes("transformer") || lowerFile.includes("network")) {
+        title = "Attention Is All You Need: High-Performance Parallel Transformers";
+      } else if (lowerFile.includes("covid") || lowerFile.includes("medical") || lowerFile.includes("health")) {
+        title = "Epidemiological Dynamics and Multi-Organ Pathology of Viral Pathogens";
+      } else if (lowerFile.includes("climate") || lowerFile.includes("carbon") || lowerFile.includes("earth")) {
+        title = "Decadal Modeling of Climate Feedback Loops and Carbon Sequestration Systems";
+      } else if (lowerFile.includes("quantum") || lowerFile.includes("physics")) {
+        title = "Coherent Quantum State Control in Semiconductor Qubit Arrays";
+      } else if (lowerFile.includes("economic") || lowerFile.includes("finance") || lowerFile.includes("market")) {
+        title = "Macroeconomic Shocks and Liquidity Constraints in Decentralized Asset Markets";
+      } else if (lowerFile.includes("database") || lowerFile.includes("sql") || lowerFile.includes("consensus")) {
+        title = "Distributed Consensus Protocols for Ultra-Low Latency Transactions";
+      } else {
+        // Professional scientific fallback
+        const formattedName = cleanName
+          .split(" ")
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(" ");
+        title = formattedName.length < 25 
+          ? `An In-Depth Investigation into the Properties and Optimization of ${formattedName}`
+          : formattedName;
+      }
+    }
+
+    // Assign realistic authors or mark empty if file looks like a clean document
+    let authors = [];
+    if (pdfMeta.author) {
+      authors = [pdfMeta.author];
+    } else {
+      const lowerFile = fileName.toLowerCase();
+      if (lowerFile.includes("report") || lowerFile.includes("resume") || lowerFile.includes("cv") || lowerFile.includes("lecture") || lowerFile.includes("note")) {
+        authors = ["Authors Not Identified"];
+      } else {
+        authors = ["Dr. Evelyn Vance", "Prof. Marcus Thorne", "Sarah Jenkins"];
+      }
+    }
 
     return {
       title: title,
-      authors: ["Dr. Evelyn Vance", "Prof. Marcus Thorne", "Sarah Jenkins"],
+      authors: authors,
       abstract_summary: `This paper introduces a state-of-the-art methodology based on "${title}". The research addresses critical latency and bandwidth bottlenecks in current systems by constructing an optimized parallel processing architecture, demonstrating significant empirical gains.`,
       key_contributions: [
         `Design of an adaptive feedback control loop optimized specifically for ${title}`,
@@ -82,7 +145,7 @@ export default function App() {
     // If API Key is missing, trigger simulated mode
     if (!GEMINI_API_KEY) {
       setTimeout(() => {
-        const mockData = generateMockAnalysis(file.name);
+        const mockData = generateMockAnalysis(file.name, file.base64);
         setAnalysisResult(mockData);
         setIsAnalyzing(false);
         setSystemAlert({
@@ -154,7 +217,7 @@ export default function App() {
     } catch (err) {
       console.error("API Call Error, falling back to mock:", err);
       // Fail gracefully: show warning and launch mockup
-      const mockData = generateMockAnalysis(file.name);
+      const mockData = generateMockAnalysis(file.name, file.base64);
       setAnalysisResult(mockData);
       setSystemAlert({
         type: "warning",
@@ -338,7 +401,7 @@ Based on the parsed paper metrics for "${analysisResult?.title || "this document
         </section>
 
         {/* AI Analysis Output & Chat Column */}
-        <section style={styles.workspaceColumn}>
+        <section style={{ ...styles.workspaceColumn, overflowY: "auto", paddingRight: "6px" }}>
           {systemAlert && (
             <div
               className="animate-fade-in"
@@ -478,6 +541,7 @@ const styles = {
     flexDirection: "column",
     gap: "24px",
     width: "100%",
+    height: "100%",
   },
   startAnalysisCard: {
     display: "flex",

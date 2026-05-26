@@ -12,7 +12,9 @@ export default function DocumentPreview({ file }) {
       className="glass-card animate-fade-in"
       style={{
         ...styles.container,
-        height: isExpanded ? "calc(100vh - 120px)" : "600px",
+        height: isExpanded ? "calc(100vh - 120px)" : "100%",
+        flexGrow: isExpanded ? 0 : 1,
+        minHeight: isExpanded ? "auto" : "450px",
         gridColumn: isExpanded ? "1 / -1" : "auto",
         transition: "height 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
       }}
