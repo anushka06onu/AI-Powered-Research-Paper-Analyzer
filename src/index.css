@@ -73,11 +73,13 @@ body {
   padding: 24px;
   position: relative;
   overflow: hidden;
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease, box-shadow 0.4s ease;
 }
 
 .glass-card:hover {
-  border-color: var(--glass-border-hover);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45), 0 0 15px rgba(99, 102, 241, 0.1);
+  transform: translateY(-4px) scale(1.008);
+  border-color: rgba(99, 102, 241, 0.3);
+  box-shadow: 0 16px 40px 0 rgba(0, 0, 0, 0.5), 0 0 25px rgba(99, 102, 241, 0.2);
 }
 
 .glass-card::before {
@@ -180,6 +182,15 @@ h1, h2, h3, h4 {
 }
 
 /* Loading Scanner styling */
+@keyframes pulseScanner {
+  0%, 100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 .scanner-overlay {
   position: absolute;
   top: 0;
@@ -189,9 +200,10 @@ h1, h2, h3, h4 {
   background: linear-gradient(
     180deg,
     rgba(99, 102, 241, 0) 0%,
-    rgba(99, 102, 241, 0.05) 50%,
+    rgba(99, 102, 241, 0.06) 50%,
     rgba(99, 102, 241, 0) 100%
   );
+  animation: pulseScanner 3s ease-in-out infinite;
   pointer-events: none;
   z-index: 2;
 }
@@ -300,17 +312,29 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: transform 0.2s, background-color 0.2s;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .tag-badge:hover {
-  transform: translateY(-1.5px);
-  background: rgba(99, 102, 241, 0.2);
-  border-color: rgba(99, 102, 241, 0.4);
+  transform: translateY(-2.5px);
+  background: rgba(99, 102, 241, 0.22);
+  border-color: rgba(99, 102, 241, 0.45);
   color: #fff;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
 }
 
-/* Chat Bubbles */
+/* Chat Bubbles with Entry Animations */
+@keyframes msgSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .message-bubble {
   padding: 14px 18px;
   border-radius: 16px;
@@ -325,6 +349,7 @@ button {
   align-self: flex-end;
   border-bottom-right-radius: 4px;
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+  animation: msgSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .message-ai {
@@ -333,6 +358,7 @@ button {
   color: var(--text-primary);
   align-self: flex-start;
   border-bottom-left-radius: 4px;
+  animation: msgSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 /* Initial Avatar Initial Badge */
