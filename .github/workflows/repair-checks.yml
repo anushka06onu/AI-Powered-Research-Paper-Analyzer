@@ -11,5 +11,11 @@ jobs:
         with:
           node-version: 22
       - run: node --test tests/*.mjs
+      - run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repaired-package-lock
+          path: package-lock.json
+          retention-days: 1
       - run: npm ci
       - run: npm run build
