@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { requestJson } from "./lib/request.mjs";
 import {
   FileText,
   Database,
@@ -20,7 +21,7 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 // Retrieve Gemini API Key from environment variables securely
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
+
 
 // Client-side PDF text and heading extractor
 const extractPdfTitleAndText = async (fileUrl) => {
@@ -114,105 +115,6 @@ export default function App() {
   const [systemAlert, setSystemAlert] = useState(null);
   const [activeTab, setActiveTab] = useState("analysis");
 
-  // Helper: Generates realistic mock analysis when API key is missing or calls fail
-  const generateMockAnalysis = (fileName, base64, extractedTitle, extractedAuthors) => {
-    let pdfMeta = { title: "", author: "" };
-    
-    // Scan PDF binary metadata for real /Title and /Author properties
-    if (base64) {
-      try {
-        const binary = atob(base64.slice(0, 150000)); // scan first 150KB
-        
-        const titleMatch = binary.match(/\/Title\s*\(([^)]+)\)/);
-        if (titleMatch && titleMatch[1]) {
-          const rawTitle = titleMatch[1].replace(/\\([()])/g, "$1").trim();
-          if (rawTitle && !rawTitle.includes("\u00fe") && !rawTitle.startsWith("\xfe")) {
-            pdfMeta.title = rawTitle;
-          }
-        }
-        
-        const authorMatch = binary.match(/\/Author\s*\(([^)]+)\)/);
-        if (authorMatch && authorMatch[1]) {
-          const rawAuthor = authorMatch[1].replace(/\\([()])/g, "$1").trim();
-          if (rawAuthor && !rawAuthor.includes("\u00fe") && !rawAuthor.startsWith("\xfe")) {
-            pdfMeta.author = rawAuthor;
-          }
-        }
-      } catch (e) {
-        console.error("Error extracting local PDF metadata:", e);
-      }
-    }
-
-    const cleanName = fileName.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
-    let title = extractedTitle || pdfMeta.title;
-    
-    if (!title) {
-      const lowerFile = fileName.toLowerCase();
-      if (lowerFile.includes("attention") || lowerFile.includes("transformer") || lowerFile.includes("network")) {
-        title = "Attention Is All You Need: High-Performance Parallel Transformers";
-      } else if (lowerFile.includes("covid") || lowerFile.includes("medical") || lowerFile.includes("health")) {
-        title = "Epidemiological Dynamics and Multi-Organ Pathology of Viral Pathogens";
-      } else if (lowerFile.includes("climate") || lowerFile.includes("carbon") || lowerFile.includes("earth")) {
-        title = "Decadal Modeling of Climate Feedback Loops and Carbon Sequestration Systems";
-      } else if (lowerFile.includes("quantum") || lowerFile.includes("physics")) {
-        title = "Coherent Quantum State Control in Semiconductor Qubit Arrays";
-      } else if (lowerFile.includes("economic") || lowerFile.includes("finance") || lowerFile.includes("market")) {
-        title = "Macroeconomic Shocks and Liquidity Constraints in Decentralized Asset Markets";
-      } else if (lowerFile.includes("database") || lowerFile.includes("sql") || lowerFile.includes("consensus")) {
-        title = "Distributed Consensus Protocols for Ultra-Low Latency Transactions";
-      } else {
-        // Professional scientific fallback
-        const formattedName = cleanName
-          .split(" ")
-          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(" ");
-        title = formattedName.length < 25 
-          ? `An In-Depth Investigation into the Properties and Optimization of ${formattedName}`
-          : formattedName;
-      }
-    }
-
-    // Assign realistic authors or mark empty if file looks like a clean document
-    let authors = [];
-    if (extractedAuthors && extractedAuthors.length > 0) {
-      authors = extractedAuthors;
-    } else if (pdfMeta.author) {
-      authors = [pdfMeta.author];
-    } else {
-      const lowerFile = fileName.toLowerCase();
-      if (lowerFile.includes("report") || lowerFile.includes("resume") || lowerFile.includes("cv") || lowerFile.includes("lecture") || lowerFile.includes("note")) {
-        authors = ["Authors Not Identified"];
-      } else {
-        authors = ["Dr. Evelyn Vance", "Prof. Marcus Thorne", "Sarah Jenkins"];
-      }
-    }
-
-    return {
-      title: title,
-      authors: authors,
-      abstract_summary: `This paper introduces a state-of-the-art methodology based on "${title}". The research addresses critical latency and bandwidth bottlenecks in current systems by constructing an optimized parallel processing architecture, demonstrating significant empirical gains.`,
-      key_contributions: [
-        `Design of an adaptive feedback control loop optimized specifically for ${title}`,
-        "Observed reduction of computational overhead by 37.4% under high stress tests",
-        "Introduction of an open-access evaluation suite for hardware benchmarks",
-        "Successful integration testing across heterogeneous cloud infrastructures"
-      ],
-      methodology: `The research framework employs a three-tier processing model. First, raw streaming telemetry is ingested and filtered. Second, an intelligent scheduling broker distributes parallel loads. Finally, a loss-minimization layer aggregates outputs, stabilizing feedback control loops in real-time.`,
-      keywords: [
-        cleanName.split(" ")[0] || "Analysis",
-        "Parallel Computing",
-        "Performance Optimization",
-        "Benchmarking",
-        "System Architecture"
-      ],
-      future_work: [
-        "Porting the operational compiler to edge IoT sensor platforms",
-        "Implementing native support for zero-shot dynamic load resizing",
-        "Integrating deep reinforcement learning models for cognitive routing"
-      ]
-    };
-  };
-
   const handleFileLoaded = async (loadedFile) => {
     setFile(loadedFile);
     // Reset previous states
@@ -244,205 +146,36 @@ export default function App() {
   };
 
   const triggerAnalysis = async () => {
-    if (!file) return;
+    if (!file || isAnalyzing) return;
     setIsAnalyzing(true);
+    setAnalysisResult(null);
     setSystemAlert(null);
-
-    // If API Key is missing, trigger simulated mode
-    if (!GEMINI_API_KEY) {
-      setTimeout(() => {
-        const mockData = generateMockAnalysis(file.name, file.base64, file.extractedTitle, file.extractedAuthors);
-        setAnalysisResult(mockData);
-        setIsAnalyzing(false);
-        setSystemAlert({
-          type: "simulated",
-          message: "No Gemini API Key configured in your .env file. Running in High-Fidelity Simulated Mode."
-        });
-      }, 2500);
-      return;
-    }
-
-    // Direct Gemini-2.0-Flash API Call
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: "application/pdf",
-                    data: file.base64
-                  }
-                },
-                {
-                  text: `You are a professional research paper analyst. Analyze this research paper and extract structural details into the requested JSON schema. You MUST return ONLY valid, raw JSON without backticks, markdown formatting, or conversational text. Use this exact JSON structure:
-{
-  "title": "Full official paper title",
-  "authors": ["Author name 1", "Author name 2"],
-  "abstract_summary": "2-3 sentence plain-English summary",
-  "key_contributions": ["contribution 1", "contribution 2"],
-  "methodology": "Simple explanation of the research process in 3-5 sentences a high school student could understand",
-  "keywords": ["keyword1", "keyword2"],
-  "future_work": ["suggestion 1", "suggestion 2"]
-}`
-                }
-              ]
-            }
-          ],
-          generationConfig: {
-            responseMimeType: "application/json"
-          }
-        })
+      const data = await requestJson('/api/analyze', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdf: file.base64 }),
       });
-
-      if (!response.ok) {
-        let errorMsg = `Status ${response.status}`;
-        try {
-          const errData = await response.json();
-          if (errData.error && errData.error.message) {
-            errorMsg = errData.error.message;
-          }
-        } catch (_) {}
-        throw new Error(errorMsg);
-      }
-
-      const data = await response.json();
-      const rawText = data.candidates[0].content.parts[0].text;
-      const parsed = JSON.parse(rawText.trim());
-      
-      setAnalysisResult(parsed);
-      setSystemAlert({
-        type: "success",
-        message: "Successfully analyzed research paper using Gemini-2.0-Flash."
-      });
-    } catch (err) {
-      console.error("API Call Error, falling back to mock:", err);
-      // Fail gracefully: show warning and launch mockup
-      const mockData = generateMockAnalysis(file.name, file.base64, file.extractedTitle, file.extractedAuthors);
-      setAnalysisResult(mockData);
-      setSystemAlert({
-        type: "warning",
-        message: `Gemini API connection failed (${err.message}). Loaded high-fidelity mock report to preserve workflow.`
-      });
-    } finally {
-      setIsAnalyzing(false);
-    }
+      setAnalysisResult(data.analysis);
+      setSystemAlert({ type: 'success', message: 'Analysis completed. Check extracted claims against the original paper.' });
+    } catch (error) {
+      setSystemAlert({ type: 'warning', message: error.message || 'Analysis is unavailable. No report was generated.' });
+    } finally { setIsAnalyzing(false); }
   };
 
   const handleSendMessage = async (text) => {
-    if (!text.trim() || chatLoading) return;
-
-    const newChatHistory = [...chatHistory, { role: "user", content: text }];
-    setChatHistory(newChatHistory);
+    if (!text.trim() || chatLoading || !analysisResult) return;
+    const history = [...chatHistory, { role: 'user', content: text }];
+    setChatHistory(history);
     setChatLoading(true);
-
-    // If API Key is missing, trigger simulated replies
-    if (!GEMINI_API_KEY) {
-      setTimeout(() => {
-        let reply = "";
-        const lowerText = text.toLowerCase();
-        
-        if (lowerText.includes("limitation") || lowerText.includes("weakness")) {
-          reply = `In this research on "${analysisResult?.title || "the uploaded paper"}", key limitations center on:
-1. **Sample Generalizability**: Tests were performed on a restricted set of hardware configurations, which may not capture performance scaling issues in production environments.
-2. **Computational Footprint**: The high density of operations still demands substantial initial compute resource buffers during startup.
-3. **Data Dependency**: The architecture is highly dependent on high-fidelity telemetry feeds; missing or corrupt inputs could degrade aggregation precision.`;
-        } else if (lowerText.includes("methodology") || lowerText.includes("how did they")) {
-          reply = `The core methodology involves a three-phase scientific workflow:
-1. **Telemetry Capture**: Custom hooks ingest raw system indicators with sub-millisecond latency.
-2. **Dynamic Scheduling**: An intelligent middleware layer partitions pipeline threads based on actual processor weights.
-3. **Aggregating Feedback**: Output datasets are normalized, feeding a convergence loop that mitigates error rates.`;
-        } else if (lowerText.includes("application") || lowerText.includes("practical")) {
-          reply = `Practical applications of "${analysisResult?.title || "this research"}" include:
-- **Cloud Datacenter Management**: Automating node allocations in large-scale server matrices.
-- **Embedded Computing**: Reducing CPU overhead in smart industrial IoT gateway systems.
-- **Aesthetic UI Architectures**: Constructing highly-responsive, micro-controlled user dashboards.`;
-        } else {
-          reply = `Regarding your question about "${text}":
-
-Based on the parsed paper metrics for "${analysisResult?.title || "this document"}", the authors emphasize that their design successfully isolates and resolves this specific problem domain. The experimental sections document a 25%+ improvement in performance metrics when running within normal parameter ranges. Future validation steps will expand directly on this aspect.`;
-        }
-
-        setChatHistory([...newChatHistory, { role: "assistant", content: reply }]);
-        setChatLoading(false);
-      }, 1500);
-      return;
-    }
-
-    // Direct Gemini-2.0-Flash Chat API Call
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: "application/pdf",
-                    data: file.base64
-                  }
-                },
-                {
-                  text: "Please analyze the attached paper. I will ask you follow-up questions about it."
-                }
-              ]
-            },
-            ...newChatHistory.map(msg => ({
-              role: msg.role === "user" ? "user" : "model",
-              parts: [
-                {
-                  text: msg.content
-                }
-              ]
-            }))
-          ],
-          systemInstruction: {
-            parts: [
-              {
-                text: "You are a professional research paper Q&A assistant. Answer user questions directly based on the uploaded research paper. Keep answers structured, technical, and objective."
-              }
-            ]
-          }
-        })
+      const data = await requestJson('/api/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ analysis: analysisResult, messages: history.slice(-12) }),
       });
-
-      if (!response.ok) {
-        let errorMsg = `Status ${response.status}`;
-        try {
-          const errData = await response.json();
-          if (errData.error && errData.error.message) {
-            errorMsg = errData.error.message;
-          }
-        } catch (_) {}
-        throw new Error(errorMsg);
-      }
-
-      const data = await response.json();
-      const rawText = data.candidates[0].content.parts[0].text;
-
-      setChatHistory([...newChatHistory, { role: "assistant", content: rawText }]);
-    } catch (err) {
-      console.error("Chat API error, falling back to mock reply:", err);
-      setChatHistory([
-        ...newChatHistory,
-        {
-          role: "assistant",
-          content: `[Network Fallback] I received your question: "${text}". Unfortunately, the Gemini API channel is experiencing blockages (${err.message}). Under standard operations, this question triggers a full textual lookup on the attached PDF base64 payload to fetch context-specific proofs.`
-        }
-      ]);
-    } finally {
-      setChatLoading(false);
-    }
+      setChatHistory([...history, { role: 'assistant', content: data.reply }]);
+    } catch (error) {
+      setSystemAlert({ type: 'warning', message: error.message || 'The assistant is unavailable. Please retry.' });
+    } finally { setChatLoading(false); }
   };
 
   return (
@@ -451,6 +184,7 @@ Based on the parsed paper metrics for "${analysisResult?.title || "this document
       <div className="glow-spot glow-purple" />
       <div className="glow-spot glow-indigo" />
 
+      <p role="note">When you choose Analyze, the PDF is sent to the configured Google Gemini service. Upload only documents you have permission to share. AI output may be wrong; verify it against the paper.</p>
       {/* Header bar */}
       <header className="glass-card" style={styles.header}>
         <div style={styles.logoWrapper}>
@@ -754,3 +488,4 @@ const styles = {
     textAlign: "left",
   },
 };
+

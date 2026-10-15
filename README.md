@@ -1,16 +1,17 @@
-# React + Vite
+# Research Paper Analyzer
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A PDF analysis interface with server-side Gemini access. Failed requests show an error; the application never substitutes invented reports or authors.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Use Node 22 or newer. Run `npm ci`, copy `.env.example` to `.env`, and configure a new server-only `GEMINI_API_KEY`. Start `npm run server` and `npm run dev` in separate terminals. Run `npm test` for API validation tests.
 
-## React Compiler
+## Deploy
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Vercel builds the Vite frontend and serves `api/analyze.js` and `api/chat.js`. Configure `GEMINI_API_KEY` and optional `GEMINI_MODEL` as server environment variables. Never use a `VITE_` variable for an API key. Revoke any old key previously embedded in a frontend deployment. The configurable default model is Gemini 2.5 Flash.
 
-## Expanding the ESLint configuration
+## Scope and privacy
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+PDFs must be smaller than 3 MB. Clicking Analyze sends the document through the backend to Google Gemini; upload only permitted material. Nothing is stored by this app, but the provider's own data policies apply. Outputs can contain errors. Chat uses the extracted analysis and says when a claim cannot be supported; it does not pretend to search the original PDF independently.
+
+This anonymous prototype needs deployment-level rate limits, spend controls, and access restrictions before broad public use. Missing credentials produce a clear 503, not a fabricated result.

@@ -25,6 +25,10 @@ export default function DropZone({ onFileLoaded, file, onReset }) {
       return;
     }
 
+    if (selectedFile.size > 3 * 1024 * 1024) {
+      setError("Please use a PDF smaller than 3 MB.");
+      return;
+    }
     setError(null);
     setIsReading(true);
 
@@ -294,3 +298,4 @@ const styles = {
     paddingTop: "12px",
   },
 };
+
